@@ -18,8 +18,8 @@ func init() {
 		Use:   "list",
 		Short: "List venvs.",
 		Long: `List Python virtual environments.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			py.ListEnv()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return py.ListEnv()
 		},
 	})
 
@@ -27,21 +27,21 @@ func init() {
 		Use:   "use",
 		Short: "Use a Python virtual environment",
 		Long: `Use a Python virtual environment.`,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				py.TryUseEnv()
+				return py.TryUseEnv()
 			} else {
-				py.UseEnv(args[0])
+				return py.UseEnv(args[0])
 			}
 		},
 	})
 
 	pyCmd.AddCommand(&cobra.Command{
-		Use:  "use?",
+		Use:  "sel",
 		Short: "Select and use a Python virtual environment",
 		Long: `Select and use a Python virtual environment.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			py.UseEnvQ()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return py.SelectEnv()
 		},
 	})
 }

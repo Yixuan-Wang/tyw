@@ -1,47 +1,124 @@
 package py
 
 import (
-	"bytes"
+	"bufio"
+	"container/list"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
+
+	"github.com/yixuan-wang/tyw/pkg/util"
 )
 
-func ListEnv() {
+// Walk through the subtree of the given path and find all Python virtual environments,
+// identified by the presence of a pyvenv.cfg file.
+//
+// The root directory should be guaranteed to exist and be a directory.
+func walkDirForVenv(root string, out chan<- string) error {
+	defer close(out)
+	queue := list.New()
+	queue.PushBack(root)
+
+	for queue.Len() > 0 {
+		elem := queue.Front()
+		queue.Remove(elem)
+		dir := elem.Value.(string)
+
+		// Check if the directory contains a Python venv
+		// Python env is marked by pyvenv.cfg file
+		maybeVenvCfg := dir + "/pyvenv.cfg"
+		if _, err := os.Stat(maybeVenvCfg); os.IsNotExist(err) {
+			// Not a Python venv, push all subdirectories to the queue
+			if files, err := os.ReadDir(dir); err == nil {
+				for _, file := range files {
+					if file.IsDir() {
+						subdir := filepath.Join(dir, file.Name())
+						queue.PushBack(subdir)
+					}
+				}
+			} else {
+				slog.Error("Cannot read directory", "path", dir, "error", err)
+				return err
+			}
+		} else {
+			out <- dir
+		}
+	}
+
+	return nil
+}
+
+type VenvInfo struct {
+	Home    string
+	Version string
+	Prompt  string
+}
+
+var regexHome = regexp.MustCompile(`^home\s*=\s*(.*)`)
+var regexVersion = regexp.MustCompile(`^version(?:_info)?\s*=\s*(.*)`)
+var regexPrompt = regexp.MustCompile(`^prompt\s*=\s*(.*)`)
+
+func getVenvInfo(prefix string) (VenvInfo, error) {
+	file, err := os.Open(filepath.Join(prefix, "pyvenv.cfg"))
+	if err != nil {
+		return VenvInfo{}, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var info VenvInfo
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if matches := regexHome.FindStringSubmatch(line); len(matches) > 1 {
+			info.Home = matches[1]
+		} else if matches := regexVersion.FindStringSubmatch(line); len(matches) > 1 {
+			info.Version = matches[1]
+		} else if matches := regexPrompt.FindStringSubmatch(line); len(matches) > 1 {
+			info.Prompt = matches[1]
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return VenvInfo{}, err
+	}
+
+	return info, nil
+}
+
+func ListEnv() error {
 	envHome := pyConfig.GetString("env.home")
 
 	// Check if the path exists
 	if envStat, err := os.Stat(envHome); os.IsNotExist(err) || !envStat.IsDir() {
 		slog.Error("Path does not exist or is not a directory", "path", envHome)
-		os.Exit(1)
+		return nil
 	}
 
-	// A Python venv is a directory with the file pyvenv.cfg
-	// Walk through all subdirectories and check if they are Python venvs
-	filepath.Walk(envHome, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			slog.Error("Cannot walk through path", "path", path, "error", err)
-			os.Exit(1)
+	dirs := make(chan string)
+	go func() {
+		if err := walkDirForVenv(envHome, dirs); err != nil {
+			slog.Error("Failed to walk directory", "path", envHome, "error", err)
+			return
 		}
-		if info.IsDir() {
-			if _, err := os.Stat(path + "/pyvenv.cfg"); err == nil {
-				relpath, _ := filepath.Rel(envHome, path)
-				fmt.Println(relpath)
-			}
-		}
-		return nil
-	})
+	}()
+	for dir := range dirs {
+		// Print the directory name
+		fmt.Println(dir)
+	}
+
+	return nil
 }
 
 // Given an environment name, print the command to activate the environment
-func UseEnv(name string) {
+func UseEnv(name string) error {
 	envHome := pyConfig.GetString("env.home")
 
 	if name == "" {
 		slog.Error("Environment name is empty")
-		os.Exit(1)
+		return nil
 	}
 
 	env := filepath.Join(envHome, name)
@@ -49,97 +126,111 @@ func UseEnv(name string) {
 	// Check if the path exists
 	if envStat, err := os.Stat(env); os.IsNotExist(err) || !envStat.IsDir() {
 		slog.Error("Path does not exist or is not a directory", "path", env)
-		os.Exit(1)
+		return nil
 	}
 
 	// Check if the environment exists
-	if _, err := os.Stat(envHome + "/" + name + "/pyvenv.cfg"); os.IsNotExist(err) {
-		slog.Error("Environment does not exist", "name", name)	
-		os.Exit(1)
+	if _, err := os.Stat(filepath.Join(envHome, name, "pyvenv.cfg")); os.IsNotExist(err) {
+		slog.Error("Environment does not exist", "name", name)
+		return nil
 	}
 
 	// Print the command to activate the environment
-	fmt.Printf("%s", fmt.Sprintf("source %s/bin/activate", env))
+	fmt.Printf("%s", fmt.Sprintf("source %s", filepath.Join(env, "bin", "activate")))
+	return nil
 }
 
 // List all Python virtual environments, pipe to `fzf` for selection
-// and then print the line to activate the selected environment 
-func UseEnvQ() {
+// and then print the line to activate the selected environment
+func SelectEnv() error {
 	envHome := pyConfig.GetString("env.home")
 
 	// Check if the path exists
 	if envStat, err := os.Stat(envHome); os.IsNotExist(err) || !envStat.IsDir() {
 		slog.Error("Environment home does not exist or is not a directory", "path", envHome)
+		return nil
 	}
 
 	// A Python venv is a directory with the file pyvenv.cfg
 	// Walk through all subdirectories and check if they are Python venvs
-	envs := make(map[string]string)
-	filepath.Walk(envHome, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			slog.Error("Cannot walk through path", "path", path, "error", err)
-			os.Exit(1)
-		}
-		if info.IsDir() {
-			if _, err := os.Stat(path + "/pyvenv.cfg"); err == nil {
-				relpath, _ := filepath.Rel(envHome, path)
-				envs[relpath] = path
-			}
-		}
-		return nil
-	})
 
-	var input bytes.Buffer
-	for k := range envs {
-		input.WriteString(k + "\n")
+	venvDirs := make(chan string)
+	go func() {
+		if err := walkDirForVenv(envHome, venvDirs); err != nil {
+			slog.Error("Failed to walk directory", "path", envHome, "error", err)
+			return
+		}
+	}()
+
+	fzf, err := util.FzfGetFromChan(venvDirs, func(path string) (util.FzfLine[string], error) {
+		relPath, _ := filepath.Rel(envHome, path)
+		info, err := getVenvInfo(path)
+		if err != nil {
+			slog.Error("Failed to get venv info", "path", path, "error", err)
+			return util.FzfLine[string]{}, err
+		}
+
+		var line util.FzfLine[string]
+		line.Key = relPath
+		line.Raw = path
+
+		name := filepath.Base(relPath)
+
+		if info.Prompt != "" && info.Prompt != name {
+			line.Pretty = []string{fmt.Sprintf("%s(%s)", info.Prompt, relPath), info.Version}
+		} else {
+			line.Pretty = []string{name, info.Version}
+		}
+
+		slog.Debug("Fzf line", "line", line.Pretty)
+
+		return line, nil
+	})
+	if err != nil {
+		slog.Error("Failed to initialize fzf", "error", err)
+		return nil
 	}
 
-	// Pipe the list of environments to fzf
-	// fzf will return the selected environment
-	fzf := exec.Command("fzf")
-	fzf.Stdin = &input
-	output, err := fzf.Output()
-	if err != nil {
-		slog.Error("Failed to run fzf", "error", err)
-		os.Exit(1)
+	// Read the selected line from fzf
+	output, ok := <-fzf
+	if !ok {
+		slog.Error("Failed to read from fzf")
+		return nil
 	}
 
 	// Print the command to activate the selected environment without an intermediate variable
-	fmt.Printf("source %s/bin/activate\n", envs[string(bytes.TrimSpace(output))])
+	fmt.Printf("%s", fmt.Sprintf("source %s", filepath.Join(output, "bin", "activate")))
+	return nil
 }
 
-func TryUseEnv() {
+func TryUseEnv() error {
 	// Get current working directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		slog.Error("Failed to get current working directory", "error", err)
-		os.Exit(1)
+		return nil
 	}
 
 	// Check if the path exists
 	if envStat, err := os.Stat(cwd); os.IsNotExist(err) || !envStat.IsDir() {
-		slog.Error("Path does not exist or is not a directory", "path", cwd)
-		os.Exit(1)
+		return util.Fail("Path does not exist or is not a directory", "path", cwd)
 	}
-
-	// TODO: Should find the nearest venv of arbitrary name
-	// Now just walk up the directory tree and check if there is a venv
-	//   of name `venv` or `.venv`
 
 	dir := cwd
 	for {
-		if _, err := os.Stat(dir + "/venv/pyvenv.cfg"); err == nil {
-			fmt.Printf("source %s/venv/bin/activate\n", dir)
+		if _, err := os.Stat(filepath.Join(dir, "venv", "pyvenv.cfg")); err == nil {
+			fmt.Printf("source %s\n", filepath.Join(dir, "venv", "bin", "activate"))
 			break
 		}
-		if _, err := os.Stat(dir + "/.venv/pyvenv.cfg"); err == nil {
-			fmt.Printf("source %s/.venv/bin/activate\n", dir)
+		if _, err := os.Stat(filepath.Join(dir, ".venv", "pyvenv.cfg")); err == nil {
+			fmt.Printf("source %s\n", filepath.Join(dir, ".venv", "bin", "activate"))
 			break
 		}
 		if filepath.Dir(dir) == dir {
-			slog.Error("No venv found")
-			os.Exit(1)
+			return util.Fail("No virtual environment found in the directory tree")
 		}
 		dir = filepath.Dir(dir)
 	}
+
+	return nil
 }
