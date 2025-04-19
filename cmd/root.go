@@ -91,7 +91,9 @@ func initLogger() {
 		level = charmlog.WarnLevel
 	case Verbose >= 3:
 		level = charmlog.InfoLevel
-	case Debug:
+	}
+
+	if Debug {
 		level = charmlog.DebugLevel
 	}
 
