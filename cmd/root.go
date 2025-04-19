@@ -58,11 +58,9 @@ func initConfig() {
 
 		osDefaultConfigPath, _ := os.UserConfigDir()
 		viper.AddConfigPath(osDefaultConfigPath)
-		slog.Debug("Add config path location candidate", "path", osDefaultConfigPath)
 
 		homeConfigPath := filepath.Join(home, ".config")
 		viper.AddConfigPath(homeConfigPath)
-		slog.Debug("Add config path location candidate", "path", homeConfigPath)
 
 		viper.SetConfigType("toml")
 		viper.SetConfigName("tyw")

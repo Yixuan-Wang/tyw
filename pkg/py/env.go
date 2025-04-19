@@ -181,9 +181,6 @@ func SelectEnv() error {
 		} else {
 			line.Pretty = []string{name, info.Version}
 		}
-
-		slog.Debug("Fzf line", "line", line.Pretty)
-
 		return line, nil
 	})
 	if err != nil {
@@ -191,15 +188,8 @@ func SelectEnv() error {
 		return nil
 	}
 
-	// Read the selected line from fzf
-	output, ok := <-fzf
-	if !ok {
-		slog.Error("Failed to read from fzf")
-		return nil
-	}
-
 	// Print the command to activate the selected environment without an intermediate variable
-	fmt.Printf("%s", fmt.Sprintf("source %s", filepath.Join(output, "bin", "activate")))
+	fmt.Printf("%s", fmt.Sprintf("source %s", filepath.Join(fzf, "bin", "activate")))
 	return nil
 }
 
