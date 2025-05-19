@@ -10,21 +10,26 @@ import (
 )
 
 type TgChat struct {
-	Id int64  `json:"id"`
-	Type string `json:"type"`
+	Id       int64  `json:"id"`
+	Type     string `json:"type"`
 	Username string `json:"username"`
 }
 
 type TgMessage struct {
-	Id int64  `json:"message_id"`
+	Id   int64  `json:"message_id"`
 	Date int64  `json:"date"`
 	From TgChat `json:"from"`
 	Chat TgChat `json:"chat"`
 	Text string `json:"text"`
 }
 
+type TgResponse[T any] struct {
+	Ok     bool   `json:"ok"`
+	Result T      `json:"result"`
+}
+
 func getBotURL(path ...string) string {
-	botUrl := fmt.Sprintf("https://api.telegram.org/bot%s", TgConfig.Get("token"))
+	botUrl := fmt.Sprintf("https://api.telegram.org/bot%s", tgConfig.Get("token"))
 	if len(path) > 0 {
 		fullUrl, _ := url.JoinPath(botUrl, path...)
 		return fullUrl
@@ -35,13 +40,13 @@ func getBotURL(path ...string) string {
 }
 
 func SendMessage(
-	chatID string,
+	chatId string,
 	message string,
 ) (TgMessage, error) {
 	url := getBotURL("sendMessage")
-	body, err := json.Marshal(map[string]interface{} {
-		"chat_id": chatID,
-		"text": message,
+	body, err := json.Marshal(map[string]interface{}{
+		"chat_id": chatId,
+		"text":    message,
 	})
 	if err != nil {
 		slog.Error("Cannot serialize message", "message", message, "error", err)
@@ -58,12 +63,12 @@ func SendMessage(
 	defer resp.Body.Close()
 
 	slog.Debug("Received response", "status", resp.StatusCode, "message", message)
-	
-	var messageResponse TgMessage
+
+	var messageResponse TgResponse[TgMessage]
 	if err := json.NewDecoder(resp.Body).Decode(&messageResponse); err != nil {
 		slog.Error("Cannot decode response", "message", message, "error", err)
 		return TgMessage{}, err
 	}
 
-	return messageResponse, nil
+	return messageResponse.Result, nil
 }

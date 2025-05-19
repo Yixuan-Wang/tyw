@@ -1,24 +1,34 @@
 package tg
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/spf13/viper"
 )
 
-var TgConfig *viper.Viper
+var tgConfig *viper.Viper
 
 func InitConfig() error {
-	if TgConfig = viper.GetViper().Sub("tg"); TgConfig == nil {
-		TgConfig = viper.New()
-		TgConfig.SetConfigName("tg")
+	if tgConfig = viper.GetViper().Sub("tg"); tgConfig == nil {
+		tgConfig = viper.New()
+		tgConfig.SetConfigName("tg")
 		slog.Warn("No [tg] config found, using default")
 	}
 
-	TgConfig.SetEnvPrefix("TELEGRAM")
-	TgConfig.BindEnv("token")
+	tgConfig.SetEnvPrefix("TELEGRAM")
+	tgConfig.BindEnv("token")
 
-	slog.Warn("Telegram config loaded", "file", TgConfig.ConfigFileUsed())
+	slog.Warn("Telegram config loaded", "file", tgConfig.ConfigFileUsed())
 
 	return nil
+}
+
+func GetChatId() (string, error) {
+	chatId := tgConfig.GetString("chat_id")
+	if chatId == "" {
+		slog.Warn("No chat_id found in config, using default")
+		return "", fmt.Errorf("No chat_id found in config")
+	}
+	return chatId, nil
 }

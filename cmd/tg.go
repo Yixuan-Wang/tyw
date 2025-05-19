@@ -27,9 +27,9 @@ func init() {
 				return util.Fail("Please provide a message to send.")
 			}
 
-			chatId := tg.TgConfig.GetString("chat_id")
-			if chatId == "" {
-				return util.Fail("Please provide a chat ID.")
+			chatId, err := tg.GetChatId()
+			if err != nil {
+				return err
 			}
 			tg.SendMessage(chatId, args[0])
 			return nil
