@@ -28,7 +28,7 @@ func GetChatId() (string, error) {
 	chatId := tgConfig.GetString("chat_id")
 	if chatId == "" {
 		slog.Warn("No chat_id found in config, using default")
-		return "", fmt.Errorf("No chat_id found in config")
+		return "", fmt.Errorf("no chat_id found in config")
 	}
 	return chatId, nil
 }

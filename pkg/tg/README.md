@@ -21,10 +21,17 @@ chat_id = "<chat_id>" # Telegram chat ID
 
 ## Messages
 
-### `text`
+### `text` and `ping`
 
-Send a text message to the configured chat.
+Use `text` to send a message to the configured chat.
 
 ```bash
 tyw tg text "<message>"
 ```
+
+`ping` is similar, but blocks until one of the following:
+- A text message is received
+- A reaction on the same message is received
+- A timeout is reached (default: 6 hours)
+
+After a reaction is received, the message is deleted.

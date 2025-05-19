@@ -13,6 +13,7 @@
 ## Usage
 
 - [Python](pkg/py/README.md)
+- [Telegram](pkg/tg/README.md)
 
 ## Build
 
