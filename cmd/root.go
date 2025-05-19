@@ -8,7 +8,6 @@ import (
 	charmlog "github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/yixuan-wang/tyw/pkg/py"
 	"golang.org/x/term"
 )
 
@@ -74,8 +73,6 @@ func initConfig() {
 	} else {
 		slog.Error("Failed to load config")
 	}
-
-	py.InitConfig()
 }
 
 func initLogger() {

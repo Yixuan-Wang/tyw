@@ -9,6 +9,9 @@ var pyCmd = &cobra.Command{
 	Use:   "py",
 	Short: "Python utilities.",
 	Long: `Utilities for managing Python installations, environments and other stuff.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return py.InitConfig()
+	},
 }
 
 func init() {

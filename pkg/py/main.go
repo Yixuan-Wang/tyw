@@ -1,15 +1,20 @@
 package py
 
 import (
+	"log/slog"
+
 	"github.com/spf13/viper"
-	"github.com/yixuan-wang/tyw/pkg/util"
 )
 
 var pyConfig *viper.Viper
 
 func InitConfig() error {
 	if pyConfig = viper.GetViper().Sub("py"); pyConfig == nil {
-		return util.Fail("Cannot find [py] config")
+		pyConfig = viper.New()
+		pyConfig.SetConfigName("py")
+		slog.Warn("No [py] config found, using default")
+
+		return nil
 	}
 	return nil
 }
