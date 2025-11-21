@@ -112,6 +112,34 @@ func ListEnv() error {
 	return nil
 }
 
+// Given an environment path, generate the command to activate the environment
+func genEnvActivateCmd(envPath string, shell string) string {
+	if shell == "" {
+		detectedShell, err := util.DetectShell()
+		if err == nil {
+			shell = detectedShell
+		} else {
+			slog.Warn("Failed to detect shell, defaulting to sh-compatible", "error", err)
+			shell = "sh"
+		}
+	}
+	quote := func(p string) string { return fmt.Sprintf("%q", p) }
+
+	bin := filepath.Join(envPath, "bin")
+	switch shell {
+	case "fish":
+		return fmt.Sprintf("source %s", quote(filepath.Join(bin, "activate.fish")))
+	case "csh", "tcsh":
+		return fmt.Sprintf("source %s", quote(filepath.Join(bin, "activate.csh")))
+	case "nu":
+		return fmt.Sprintf("source %s", quote(filepath.Join(bin, "activate.nu")))
+	case "powershell", "pwsh":
+		return fmt.Sprintf("source %s", quote(filepath.Join(bin, "activate.ps1")))
+	default:
+		return fmt.Sprintf("source %s", quote(filepath.Join(bin, "activate")))
+	}
+}
+
 // Given an environment name, print the command to activate the environment
 func UseEnv(name string) error {
 	envHome := pyConfig.GetString("env.home")
@@ -136,7 +164,7 @@ func UseEnv(name string) error {
 	}
 
 	// Print the command to activate the environment
-	fmt.Printf("%s", fmt.Sprintf("source %s", filepath.Join(env, "bin", "activate")))
+	fmt.Printf("%s", genEnvActivateCmd(env, ""))
 	return nil
 }
 
@@ -189,7 +217,7 @@ func SelectEnv() error {
 	}
 
 	// Print the command to activate the selected environment without an intermediate variable
-	fmt.Printf("%s", fmt.Sprintf("source %s", filepath.Join(fzf, "bin", "activate")))
+	fmt.Printf("%s", genEnvActivateCmd(fzf, ""))
 	return nil
 }
 
@@ -209,11 +237,11 @@ func TryUseEnv() error {
 	dir := cwd
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "venv", "pyvenv.cfg")); err == nil {
-			fmt.Printf("source %s\n", filepath.Join(dir, "venv", "bin", "activate"))
+			fmt.Printf("%s\n", genEnvActivateCmd(filepath.Join(dir, "venv"), ""))
 			break
 		}
 		if _, err := os.Stat(filepath.Join(dir, ".venv", "pyvenv.cfg")); err == nil {
-			fmt.Printf("source %s\n", filepath.Join(dir, ".venv", "bin", "activate"))
+			fmt.Printf("%s\n", genEnvActivateCmd(filepath.Join(dir, ".venv"), ""))
 			break
 		}
 		if filepath.Dir(dir) == dir {

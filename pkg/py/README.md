@@ -26,6 +26,12 @@ $(tyw py use       ) # find the venv or .venv in the nearest parent
 $(tyw py sel       ) # fuzzyfind available Python virtualenvs with `fzf`
 ```
 
+To activate the environment, eval the output of this command.
+
+```bash
+eval "$(tyw py use)"
+```
+
 ### `list`
 
 List all available Python virtualenvs.

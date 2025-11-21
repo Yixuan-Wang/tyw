@@ -8,7 +8,9 @@
 > [!WARNING]
 > This is for personal usage.
 > Breaking changes may happen.
-> Notice that `tyw` is not supporting Windows and non-POSIX shells (like `fish`).
+> Notice that `tyw` is not supporting Windows.
+>
+> Previously non-POSIX shell such as `fish` is not supported, but now it is experimentally supported.
 
 ## Usage
 
