@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+
+      - name: Build for Linux amd64
+        run: GOOS=linux GOARCH=amd64 go build -v -ldflags="-s -w" -o tyw-linux-amd64 .
+
+      - name: Build for macOS arm64
+        run: GOOS=darwin GOARCH=arm64 go build -v -ldflags="-s -w" -o tyw-darwin-aarch64 .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            tyw-linux-amd64
+            tyw-darwin-aarch64
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
