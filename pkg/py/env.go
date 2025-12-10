@@ -157,14 +157,18 @@ func UseEnv(name string) error {
 		return nil
 	}
 
-	// Check if the environment exists
-	if _, err := os.Stat(filepath.Join(envHome, name, "pyvenv.cfg")); os.IsNotExist(err) {
-		slog.Error("Environment does not exist", "name", name)
-		return nil
+
+	for _, suffix := range []string{"", ".venv", "venv"} {
+		envVariation := filepath.Join(env, suffix)
+		if _, err := os.Stat(filepath.Join(envVariation, "pyvenv.cfg")); err == nil {
+			// Print the command to activate the environment
+			fmt.Printf("%s", genEnvActivateCmd(envVariation, ""))
+			return nil
+		}
 	}
 
-	// Print the command to activate the environment
-	fmt.Printf("%s", genEnvActivateCmd(env, ""))
+
+	slog.Error("Environment does not exist", "name", name)
 	return nil
 }
 
