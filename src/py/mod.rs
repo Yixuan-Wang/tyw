@@ -4,9 +4,31 @@ mod env;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
+use clap::Subcommand;
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// List Python virtual environments
+    List,
+    /// Use a Python virtual environment
+    Use {
+        /// Environment name (omit to auto-detect from cwd)
+        name: Option<String>,
+    },
+    /// Select and use a Python virtual environment
+    Sel,
+}
 
 use crate::config::PyConfig;
 use crate::util::fzf::{self, FzfLine};
+
+pub fn dispatch(config: &PyConfig, command: Commands) -> Result<()> {
+    match command {
+        Commands::List => list(config),
+        Commands::Use { name } => use_env(config, name.as_deref()),
+        Commands::Sel => select_env(config),
+    }
+}
 
 pub fn list(config: &PyConfig) -> Result<()> {
     let env_home = Path::new(&config.env.home);

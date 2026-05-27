@@ -3,8 +3,6 @@ mod py;
 mod tg;
 mod util;
 
-use std::time::Duration;
-
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use clap_verbosity_flag::{OffLevel, Verbosity};
@@ -30,48 +28,13 @@ enum Commands {
     /// Python utilities
     Py {
         #[command(subcommand)]
-        command: PyCommands,
+        command: py::Commands,
     },
     /// Telegram utilities
     Tg {
         #[command(subcommand)]
-        command: TgCommands,
+        command: tg::Commands,
     },
-}
-
-#[derive(Subcommand)]
-enum PyCommands {
-    /// List Python virtual environments
-    List,
-    /// Use a Python virtual environment
-    Use {
-        /// Environment name (omit to auto-detect from cwd)
-        name: Option<String>,
-    },
-    /// Select and use a Python virtual environment
-    Sel,
-}
-
-#[derive(Subcommand)]
-enum TgCommands {
-    /// Send a text message to a Telegram chat
-    Text {
-        /// Message to send (default: "Hello, world!")
-        message: Option<String>,
-    },
-    /// Send a ping message and wait for response
-    Ping {
-        /// Message to send (default: "Heads up!")
-        text: Option<String>,
-
-        /// Duration to wait before timeout (e.g. "6h", "30m", "1h30m")
-        #[arg(short, long, default_value = "6h", value_parser = parse_duration)]
-        timeout: Duration,
-    },
-}
-
-fn parse_duration(s: &str) -> Result<Duration, String> {
-    humantime::parse_duration(s).map_err(|e| e.to_string())
 }
 
 fn main() -> Result<()> {
@@ -84,20 +47,7 @@ fn main() -> Result<()> {
     let config = AppConfig::load(cli.config.as_deref())?;
 
     match cli.command {
-        Commands::Py { command } => match command {
-            PyCommands::List => py::list(&config.py),
-            PyCommands::Use { name } => py::use_env(&config.py, name.as_deref()),
-            PyCommands::Sel => py::select_env(&config.py),
-        },
-        Commands::Tg { command } => match command {
-            TgCommands::Text { message } => {
-                let msg = message.as_deref().unwrap_or("Hello, world!");
-                tg::text(&config.tg, msg)
-            }
-            TgCommands::Ping { text, timeout } => {
-                let msg = text.as_deref().unwrap_or("Heads up!");
-                tg::ping(&config.tg, msg, timeout)
-            }
-        },
+        Commands::Py { command } => py::dispatch(&config.py, command),
+        Commands::Tg { command } => tg::dispatch(&config.tg, command),
     }
 }
