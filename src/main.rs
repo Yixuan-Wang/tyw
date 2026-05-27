@@ -71,40 +71,7 @@ enum TgCommands {
 }
 
 fn parse_duration(s: &str) -> Result<Duration, String> {
-    let s = s.trim();
-    let mut total_secs: u64 = 0;
-    let mut current_num = String::new();
-
-    for c in s.chars() {
-        if c.is_ascii_digit() {
-            current_num.push(c);
-        } else {
-            let n: u64 = current_num
-                .parse()
-                .map_err(|_| format!("invalid duration: {s}"))?;
-            current_num.clear();
-            match c {
-                'h' => total_secs += n * 3600,
-                'm' => total_secs += n * 60,
-                's' => total_secs += n,
-                _ => return Err(format!("unknown duration unit: {c}")),
-            }
-        }
-    }
-
-    // Handle bare number (treat as seconds)
-    if !current_num.is_empty() {
-        let n: u64 = current_num
-            .parse()
-            .map_err(|_| format!("invalid duration: {s}"))?;
-        total_secs += n;
-    }
-
-    if total_secs == 0 {
-        return Err(format!("invalid duration: {s}"));
-    }
-
-    Ok(Duration::from_secs(total_secs))
+    humantime::parse_duration(s).map_err(|e| e.to_string())
 }
 
 fn main() -> Result<()> {
