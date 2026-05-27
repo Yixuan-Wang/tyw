@@ -6,7 +6,8 @@ mod util;
 use std::time::Duration;
 
 use anyhow::Result;
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{Parser, Subcommand};
+use clap_verbosity_flag::{OffLevel, Verbosity};
 
 use config::AppConfig;
 
@@ -17,13 +18,8 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<String>,
 
-    /// Verbosity level, max at -vvv (default: 0)
-    #[arg(short, long, action = ArgAction::Count, global = true)]
-    verbose: u8,
-
-    /// Print debug information
-    #[arg(short = 'D', long, global = true)]
-    debug: bool,
+    #[command(flatten)]
+    verbose: Verbosity<OffLevel>,
 
     #[command(subcommand)]
     command: Commands,
@@ -111,27 +107,12 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
     Ok(Duration::from_secs(total_secs))
 }
 
-fn init_logger(verbose: u8, debug: bool) {
-    let level = if debug {
-        log::LevelFilter::Debug
-    } else {
-        match verbose {
-            0 => log::LevelFilter::Off,
-            1 => log::LevelFilter::Error,
-            2 => log::LevelFilter::Warn,
-            _ => log::LevelFilter::Info,
-        }
-    };
-
-    env_logger::Builder::new()
-        .filter_level(level)
-        .target(env_logger::Target::Stderr)
-        .init();
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_logger(cli.verbose, cli.debug);
+    env_logger::Builder::new()
+        .filter_level(cli.verbose.log_level_filter())
+        .target(env_logger::Target::Stderr)
+        .init();
 
     let config = AppConfig::load(cli.config.as_deref())?;
 
