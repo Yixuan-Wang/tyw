@@ -9,30 +9,61 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and Release
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: tyw-linux-amd64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: tyw-darwin-aarch64
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Package release binary
+        run: |
+          cp "target/${{ matrix.target }}/release/tyw" "${{ matrix.artifact }}"
+          chmod +x "${{ matrix.artifact }}"
+
+      - name: Upload release binary
+        uses: actions/upload-artifact@v4
         with:
-          go-version: '1.24.0'
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
 
-      - name: Build for Linux amd64
-        run: GOOS=linux GOARCH=amd64 go build -v -ldflags="-s -w" -o tyw-linux-amd64 .
-
-      - name: Build for macOS arm64
-        run: GOOS=darwin GOARCH=arm64 go build -v -ldflags="-s -w" -o tyw-darwin-aarch64 .
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            tyw-linux-amd64
-            tyw-darwin-aarch64
+          files: dist/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

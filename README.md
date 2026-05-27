@@ -20,11 +20,13 @@
 ## Build
 
 ```bash
-# Build for aarch64-darwin
-env GOOS=darwin GOARCH=arm64 go build -o tyw
+# Build for the current platform
+cargo build --release
 
-# Build for amd64-linux
-env GOOS=linux GOARCH=amd64 go build -o tyw
-# Build for aarch64-linux
-env GOOS=linux GOARCH=arm64 go build -o tyw
+# Build the release targets
+rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin
+cargo build --locked --release --target x86_64-unknown-linux-gnu
+cargo build --locked --release --target aarch64-apple-darwin
 ```
+
+GitHub CI will automatically build for `x86_64-unknown-linux-gnu` and `aarch64-apple-darwin`.
