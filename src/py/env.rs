@@ -26,7 +26,7 @@ pub fn walk_dir_for_venv(root: &Path) -> Vec<PathBuf> {
             match fs::read_dir(&dir) {
                 Ok(entries) => {
                     for entry in entries.flatten() {
-                        if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+                        if entry.path().is_dir() {
                             queue.push_back(entry.path());
                         }
                     }
