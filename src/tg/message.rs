@@ -1,3 +1,4 @@
+use std::ops::ControlFlow::{self, Break, Continue};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -27,7 +28,7 @@ pub enum TextFormat {
     /// Plain text, no formatting
     #[default]
     PlainText,
-    /// Telegram's MarkdownV2 format 
+    /// Telegram's MarkdownV2 format
     Markdown,
     /// Telegram's HTML format
     Html,
@@ -105,11 +106,45 @@ impl TgClient {
         timeout: Duration,
     ) -> Result<()> {
         let orig = self.send_message(text, format)?;
-        let message_id = orig.id;
-        let message_sent_time = orig.date;
 
+        let reply = self.wait_for_update(&["message", "message_reaction"], timeout, |update| {
+            // Check for reaction on our message
+            if let Some(reaction) = update.get("message_reaction")
+                && let Some(mid) = reaction.get("message_id")
+                && mid.as_i64() == Some(orig.id)
+            {
+                log::debug!("Received pong by reaction");
+                return Break(None);
+            }
+
+            // Check for new message after our sent time
+            if let Some(msg) = update.get("message")
+                && let Some(date) = msg.get("date").and_then(|d| d.as_i64())
+                && date > orig.date
+            {
+                log::debug!("Received pong by message");
+                return Break(msg.get("message_id").and_then(|m| m.as_i64()));
+            }
+
+            Continue(())
+        })?;
+
+        if transient {
+            let cleanup: Vec<i64> = std::iter::once(orig.id).chain(reply).collect();
+            self.delete_messages(&cleanup);
+        }
+        Ok(())
+    }
+
+    /// Polls `getUpdates` until `on_update` returns [`Break`] for some
+    /// update, or `timeout` elapses.
+    fn wait_for_update<T>(
+        &self,
+        allowed_updates: &[&str],
+        timeout: Duration,
+        mut on_update: impl FnMut(&Value) -> ControlFlow<T>,
+    ) -> Result<T> {
         let mut offset: i64 = -1;
-        let mut cleanup = vec![message_id];
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -119,38 +154,15 @@ impl TgClient {
             }
 
             let update_body = json!({
-                "allowed_updates": ["message", "message_reaction"],
+                "allowed_updates": allowed_updates,
                 "offset": offset,
             });
 
             match self.call::<Vec<Value>>("getUpdates", &update_body) {
                 Ok(updates) => {
                     for update in &updates {
-                        // Check for reaction on our message
-                        if let Some(reaction) = update.get("message_reaction")
-                            && let Some(mid) = reaction.get("message_id")
-                            && mid.as_i64() == Some(message_id)
-                        {
-                            log::debug!("Received pong by reaction");
-                            if transient {
-                                self.delete_messages(&cleanup);
-                            }
-                            return Ok(());
-                        }
-
-                        // Check for new message after our sent time
-                        if let Some(msg) = update.get("message")
-                            && let Some(date) = msg.get("date").and_then(|d| d.as_i64())
-                            && date > message_sent_time
-                        {
-                            log::debug!("Received pong by message");
-                            if let Some(mid) = msg.get("message_id").and_then(|m| m.as_i64()) {
-                                cleanup.push(mid);
-                            }
-                            if transient {
-                                self.delete_messages(&cleanup);
-                            }
-                            return Ok(());
+                        if let Break(value) = on_update(update) {
+                            return Ok(value);
                         }
 
                         // Advance offset
@@ -164,7 +176,7 @@ impl TgClient {
                 }
             }
 
-            log::debug!("Waiting for message update for message_id={message_id}");
+            log::debug!("Waiting for updates");
             thread::sleep(Duration::from_secs(5));
         }
     }
