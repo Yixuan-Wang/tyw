@@ -31,6 +31,16 @@ pub enum Commands {
         /// Duration to wait before timeout (e.g. "6h", "30m", "1h30m")
         #[arg(short, long, default_value = "6h", value_parser = parse_duration)]
         timeout: Duration,
+
+        /// Delete the ping and its reply once a response is received
+        #[arg(
+            long,
+            default_value_t = true,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        transient: bool,
     },
 }
 
@@ -49,10 +59,12 @@ pub fn dispatch(config: &TgConfig, command: Commands) -> Result<()> {
             text,
             format,
             timeout,
+            transient,
         } => ping(
             config,
             text.as_deref().unwrap_or("Heads up!"),
             format,
+            transient,
             timeout,
         ),
     }
@@ -71,8 +83,14 @@ pub fn text(config: &TgConfig, message: &str, format: TextFormat) -> Result<()> 
     Ok(())
 }
 
-pub fn ping(config: &TgConfig, message: &str, format: TextFormat, timeout: Duration) -> Result<()> {
+pub fn ping(
+    config: &TgConfig,
+    message: &str,
+    format: TextFormat,
+    transient: bool,
+    timeout: Duration,
+) -> Result<()> {
     let client = make_client(config)?;
-    client.send_ping(message, format, true, timeout)?;
+    client.send_ping(message, format, transient, timeout)?;
     Ok(())
 }
