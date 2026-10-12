@@ -15,7 +15,7 @@ pub enum Commands {
         /// Message to send (default: "Hello, world!")
         message: Option<String>,
 
-        /// Text format of the message (markdown is Telegram's MarkdownV2)
+        /// Text format of the message
         #[arg(short, long, value_enum, default_value_t = TextFormat::PlainText)]
         format: TextFormat,
     },
@@ -24,7 +24,7 @@ pub enum Commands {
         /// Message to send (default: "Heads up!")
         text: Option<String>,
 
-        /// Text format of the message (markdown is Telegram's MarkdownV2)
+        /// Text format of the message
         #[arg(short, long, value_enum, default_value_t = TextFormat::PlainText)]
         format: TextFormat,
 

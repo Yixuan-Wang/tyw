@@ -27,7 +27,7 @@ pub enum TextFormat {
     /// Plain text, no formatting
     #[default]
     PlainText,
-    /// Telegram's MarkdownV2 format (special characters must be escaped)
+    /// Telegram's MarkdownV2 format 
     Markdown,
     /// Telegram's HTML format
     Html,
