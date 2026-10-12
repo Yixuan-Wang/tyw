@@ -8,18 +8,55 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+/// Upper bound of a single `getUpdates` long poll.
+const LONG_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Extra time allowed on top of the long poll before the HTTP request is abandoned.
+const LONG_POLL_SLACK: Duration = Duration::from_secs(10);
+/// Delay before retrying after a failed poll.
+const RETRY_DELAY: Duration = Duration::from_secs(5);
+
 #[derive(Deserialize)]
 pub struct TgResponse<T> {
     pub ok: bool,
     pub result: Option<T>,
     pub description: Option<String>,
+    pub error_code: Option<i64>,
+}
+
+/// An `ok: false` response from the Bot API.
+#[derive(Debug)]
+pub struct TgApiError {
+    pub method: String,
+    pub code: Option<i64>,
+    pub description: String,
+}
+
+impl std::fmt::Display for TgApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Telegram {} failed: {}", self.method, self.description)
+    }
+}
+
+impl std::error::Error for TgApiError {}
+
+impl TgApiError {
+    /// Whether the request may succeed if retried, i.e. rate limiting or a
+    /// server-side error.
+    fn is_transient(&self) -> bool {
+        matches!(self.code, Some(429) | Some(500..))
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TgChat {
+    pub id: i64,
 }
 
 #[derive(Deserialize)]
 pub struct TgMessage {
     #[serde(rename = "message_id")]
     pub id: i64,
-    pub date: i64,
+    pub chat: TgChat,
 }
 
 /// Text formatting of a message, mapped to Telegram's `parse_mode`.
@@ -61,12 +98,18 @@ impl TgClient {
         format!("https://api.telegram.org/bot{}/{}", self.token, path)
     }
 
-    /// Calls a Bot API method, turning `ok: false` responses into errors with
-    /// Telegram's `description`.
-    fn call<T: DeserializeOwned>(&self, method: &str, body: &Value) -> Result<T> {
+    /// Calls a Bot API method, turning `ok: false` responses into
+    /// [`TgApiError`]s. The request is abandoned after `timeout`, if given.
+    fn call<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        body: &Value,
+        timeout: Option<Duration>,
+    ) -> Result<T> {
         let resp: TgResponse<T> = ureq::post(&self.bot_url(method))
             .config()
             .http_status_as_error(false)
+            .timeout_global(timeout)
             .build()
             .send_json(body)
             .with_context(|| format!("Failed to call {method}"))?
@@ -75,8 +118,12 @@ impl TgClient {
             .with_context(|| format!("Failed to decode {method} response"))?;
 
         if !resp.ok {
-            let description = resp.description.as_deref().unwrap_or("unknown error");
-            return Err(anyhow!("Telegram {method} failed: {description}"));
+            return Err(TgApiError {
+                method: method.to_string(),
+                code: resp.error_code,
+                description: resp.description.unwrap_or_else(|| "unknown error".into()),
+            }
+            .into());
         }
         resp.result
             .with_context(|| format!("Telegram {method} returned no result"))
@@ -94,7 +141,7 @@ impl TgClient {
 
         log::debug!("Sending message: {text} to {url}");
 
-        self.call("sendMessage", &body)
+        self.call("sendMessage", &body, None)
             .context("Failed to send message")
     }
 
@@ -108,8 +155,12 @@ impl TgClient {
         let orig = self.send_message(text, format)?;
 
         let reply = self.wait_for_update(&["message", "message_reaction"], timeout, |update| {
+            let in_chat =
+                |v: &Value| v.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id);
+
             // Check for reaction on our message
             if let Some(reaction) = update.get("message_reaction")
+                && in_chat(reaction)
                 && let Some(mid) = reaction.get("message_id")
                 && mid.as_i64() == Some(orig.id)
             {
@@ -117,13 +168,14 @@ impl TgClient {
                 return Break(None);
             }
 
-            // Check for new message after our sent time
+            // Check for new message after ours in the same chat
             if let Some(msg) = update.get("message")
-                && let Some(date) = msg.get("date").and_then(|d| d.as_i64())
-                && date > orig.date
+                && in_chat(msg)
+                && let Some(mid) = msg.get("message_id").and_then(|m| m.as_i64())
+                && mid > orig.id
             {
                 log::debug!("Received pong by message");
-                return Break(msg.get("message_id").and_then(|m| m.as_i64()));
+                return Break(Some(mid));
             }
 
             Continue(())
@@ -136,8 +188,11 @@ impl TgClient {
         Ok(())
     }
 
-    /// Polls `getUpdates` until `on_update` returns [`Break`] for some
+    /// Long polls `getUpdates` until `on_update` returns [`Break`] for some
     /// update, or `timeout` elapses.
+    ///
+    /// Network failures, rate limiting and server-side errors are retried;
+    /// other API errors (e.g. a bad token or a conflicting webhook) are returned.
     fn wait_for_update<T>(
         &self,
         allowed_updates: &[&str],
@@ -148,17 +203,25 @@ impl TgClient {
         let deadline = Instant::now() + timeout;
 
         loop {
-            if Instant::now() > deadline {
-                eprintln!("Timeout after {}s", timeout.as_secs());
-                std::process::exit(1);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(anyhow!("Timeout after {}s", timeout.as_secs()));
             }
+            // Telegram requires a positive long poll timeout
+            let poll_timeout = remaining.clamp(Duration::from_secs(1), LONG_POLL_TIMEOUT);
 
             let update_body = json!({
                 "allowed_updates": allowed_updates,
                 "offset": offset,
+                "timeout": poll_timeout.as_secs(),
             });
 
-            match self.call::<Vec<Value>>("getUpdates", &update_body) {
+            log::debug!("Waiting for updates");
+            match self.call::<Vec<Value>>(
+                "getUpdates",
+                &update_body,
+                Some(poll_timeout + LONG_POLL_SLACK),
+            ) {
                 Ok(updates) => {
                     for update in &updates {
                         if let Break(value) = on_update(update) {
@@ -172,12 +235,15 @@ impl TgClient {
                     }
                 }
                 Err(e) => {
+                    if let Some(api_err) = e.downcast_ref::<TgApiError>()
+                        && !api_err.is_transient()
+                    {
+                        return Err(e.context("Failed to poll updates"));
+                    }
                     log::warn!("Failed to poll updates: {e:#}");
+                    thread::sleep(RETRY_DELAY);
                 }
             }
-
-            log::debug!("Waiting for updates");
-            thread::sleep(Duration::from_secs(5));
         }
     }
 
@@ -187,7 +253,7 @@ impl TgClient {
             "message_ids": message_ids,
         });
 
-        if let Err(e) = self.call::<bool>("deleteMessages", &body) {
+        if let Err(e) = self.call::<bool>("deleteMessages", &body, None) {
             log::warn!("Failed to delete messages: {e:#}");
         }
     }
