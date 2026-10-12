@@ -1,15 +1,17 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
+use clap::ValueEnum;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 #[derive(Deserialize)]
 pub struct TgResponse<T> {
-    #[allow(dead_code)]
     pub ok: bool,
-    pub result: T,
+    pub result: Option<T>,
+    pub description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -17,6 +19,28 @@ pub struct TgMessage {
     #[serde(rename = "message_id")]
     pub id: i64,
     pub date: i64,
+}
+
+/// Text formatting of a message, mapped to Telegram's `parse_mode`.
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+pub enum TextFormat {
+    /// Plain text, no formatting
+    #[default]
+    PlainText,
+    /// Telegram's MarkdownV2 format (special characters must be escaped)
+    Markdown,
+    /// Telegram's HTML format
+    Html,
+}
+
+impl TextFormat {
+    fn parse_mode(self) -> Option<&'static str> {
+        match self {
+            TextFormat::PlainText => None,
+            TextFormat::Markdown => Some("MarkdownV2"),
+            TextFormat::Html => Some("HTML"),
+        }
+    }
 }
 
 pub struct TgClient {
@@ -36,27 +60,51 @@ impl TgClient {
         format!("https://api.telegram.org/bot{}/{}", self.token, path)
     }
 
-    pub fn send_message(&self, text: &str) -> Result<TgMessage> {
+    /// Calls a Bot API method, turning `ok: false` responses into errors with
+    /// Telegram's `description`.
+    fn call<T: DeserializeOwned>(&self, method: &str, body: &Value) -> Result<T> {
+        let resp: TgResponse<T> = ureq::post(&self.bot_url(method))
+            .config()
+            .http_status_as_error(false)
+            .build()
+            .send_json(body)
+            .with_context(|| format!("Failed to call {method}"))?
+            .body_mut()
+            .read_json()
+            .with_context(|| format!("Failed to decode {method} response"))?;
+
+        if !resp.ok {
+            let description = resp.description.as_deref().unwrap_or("unknown error");
+            return Err(anyhow!("Telegram {method} failed: {description}"));
+        }
+        resp.result
+            .with_context(|| format!("Telegram {method} returned no result"))
+    }
+
+    pub fn send_message(&self, text: &str, format: TextFormat) -> Result<TgMessage> {
         let url = self.bot_url("sendMessage");
-        let body = json!({
+        let mut body = json!({
             "chat_id": self.chat_id,
             "text": text,
         });
+        if let Some(parse_mode) = format.parse_mode() {
+            body["parse_mode"] = json!(parse_mode);
+        }
 
         log::debug!("Sending message: {text} to {url}");
 
-        let resp: TgResponse<TgMessage> = ureq::post(&url)
-            .send_json(&body)
-            .context("Failed to send message")?
-            .body_mut()
-            .read_json()
-            .context("Failed to decode sendMessage response")?;
-
-        Ok(resp.result)
+        self.call("sendMessage", &body)
+            .context("Failed to send message")
     }
 
-    pub fn send_ping(&self, text: &str, transient: bool, timeout: Duration) -> Result<()> {
-        let orig = self.send_message(text)?;
+    pub fn send_ping(
+        &self,
+        text: &str,
+        format: TextFormat,
+        transient: bool,
+        timeout: Duration,
+    ) -> Result<()> {
+        let orig = self.send_message(text, format)?;
         let message_id = orig.id;
         let message_sent_time = orig.date;
 
@@ -75,20 +123,9 @@ impl TgClient {
                 "offset": offset,
             });
 
-            let updates: Result<TgResponse<Vec<Value>>> = (|| {
-                let resp = ureq::post(&self.bot_url("getUpdates"))
-                    .send_json(&update_body)
-                    .context("Failed to poll updates")?;
-                let parsed = resp
-                    .into_body()
-                    .read_json()
-                    .context("Failed to decode getUpdates response")?;
-                Ok(parsed)
-            })();
-
-            match updates {
-                Ok(resp) => {
-                    for update in &resp.result {
+            match self.call::<Vec<Value>>("getUpdates", &update_body) {
+                Ok(updates) => {
+                    for update in &updates {
                         // Check for reaction on our message
                         if let Some(reaction) = update.get("message_reaction")
                             && let Some(mid) = reaction.get("message_id")
@@ -123,7 +160,7 @@ impl TgClient {
                     }
                 }
                 Err(e) => {
-                    log::warn!("Failed to poll updates: {e}");
+                    log::warn!("Failed to poll updates: {e:#}");
                 }
             }
 
@@ -138,8 +175,8 @@ impl TgClient {
             "message_ids": message_ids,
         });
 
-        if let Err(e) = ureq::post(&self.bot_url("deleteMessages")).send_json(&body) {
-            log::warn!("Failed to delete messages: {e}");
+        if let Err(e) = self.call::<bool>("deleteMessages", &body) {
+            log::warn!("Failed to delete messages: {e:#}");
         }
     }
 }
