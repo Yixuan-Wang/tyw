@@ -42,10 +42,57 @@ pub enum Commands {
         )]
         transient: bool,
     },
+    /// Send a message and print the text reply
+    Ask {
+        /// Message to send (default: "Waiting for your reply:")
+        text: Option<String>,
+
+        /// Text format of the message
+        #[arg(short, long, value_enum, default_value_t = TextFormat::PlainText)]
+        format: TextFormat,
+
+        /// Duration to wait before timeout (e.g. "6h", "30m", "1h30m")
+        #[arg(short, long, default_value = "6h", value_parser = parse_duration)]
+        timeout: Duration,
+    },
+    /// Send a message with buttons and print the option picked
+    Pick {
+        /// Message to send (default: "Pick one:")
+        text: Option<String>,
+
+        /// Option to pick from, shown as a button (repeatable)
+        #[arg(
+            short,
+            long = "option",
+            value_name = "OPTION",
+            required_unless_present = "confirm",
+            value_parser = parse_option
+        )]
+        options: Vec<String>,
+
+        /// Shorthand for `--option yes --option no`
+        #[arg(short = 'C', long, conflicts_with = "options")]
+        confirm: bool,
+
+        /// Text format of the message
+        #[arg(short, long, value_enum, default_value_t = TextFormat::PlainText)]
+        format: TextFormat,
+
+        /// Duration to wait before timeout (e.g. "6h", "30m", "1h30m")
+        #[arg(short, long, default_value = "6h", value_parser = parse_duration)]
+        timeout: Duration,
+    },
 }
 
 fn parse_duration(s: &str) -> Result<Duration, String> {
     humantime::parse_duration(s).map_err(|e| e.to_string())
+}
+
+fn parse_option(s: &str) -> Result<String, String> {
+    if s.trim().is_empty() {
+        return Err("option must not be empty".into());
+    }
+    Ok(s.to_string())
 }
 
 pub fn dispatch(config: &TgConfig, command: Commands) -> Result<()> {
@@ -67,6 +114,36 @@ pub fn dispatch(config: &TgConfig, command: Commands) -> Result<()> {
             transient,
             timeout,
         ),
+        Commands::Ask {
+            text,
+            format,
+            timeout,
+        } => ask(
+            config,
+            text.as_deref().unwrap_or("Waiting for your reply:"),
+            format,
+            timeout,
+        ),
+        Commands::Pick {
+            text,
+            options,
+            confirm,
+            format,
+            timeout,
+        } => {
+            let options = if confirm {
+                vec!["yes".to_string(), "no".to_string()]
+            } else {
+                options
+            };
+            pick(
+                config,
+                text.as_deref().unwrap_or("Pick one:"),
+                format,
+                &options,
+                timeout,
+            )
+        }
     }
 }
 
@@ -79,7 +156,7 @@ fn make_client(config: &TgConfig) -> Result<TgClient> {
 
 pub fn text(config: &TgConfig, message: &str, format: TextFormat) -> Result<()> {
     let client = make_client(config)?;
-    client.send_message(message, format)?;
+    client.send_message(message, format, None)?;
     Ok(())
 }
 
@@ -92,5 +169,25 @@ pub fn ping(
 ) -> Result<()> {
     let client = make_client(config)?;
     client.send_ping(message, format, transient, timeout)?;
+    Ok(())
+}
+
+pub fn ask(config: &TgConfig, message: &str, format: TextFormat, timeout: Duration) -> Result<()> {
+    let client = make_client(config)?;
+    let answer = client.send_ask(message, format, timeout)?;
+    println!("{answer}");
+    Ok(())
+}
+
+pub fn pick(
+    config: &TgConfig,
+    message: &str,
+    format: TextFormat,
+    options: &[String],
+    timeout: Duration,
+) -> Result<()> {
+    let client = make_client(config)?;
+    let choice = client.send_pick(message, format, options, timeout)?;
+    println!("{choice}");
     Ok(())
 }

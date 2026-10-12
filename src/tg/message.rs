@@ -79,6 +79,24 @@ impl TextFormat {
             TextFormat::Html => Some("HTML"),
         }
     }
+
+    /// Wraps `text` in a pre block, escaping it as required by the format.
+    fn pre(self, text: &str) -> String {
+        match self {
+            TextFormat::PlainText => text.to_string(),
+            TextFormat::Markdown => {
+                let escaped = text.replace('\\', "\\\\").replace('`', "\\`");
+                format!("```\n{escaped}\n```")
+            }
+            TextFormat::Html => {
+                let escaped = text
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;");
+                format!("<pre>{escaped}</pre>")
+            }
+        }
+    }
 }
 
 pub struct TgClient {
@@ -129,7 +147,12 @@ impl TgClient {
             .with_context(|| format!("Telegram {method} returned no result"))
     }
 
-    pub fn send_message(&self, text: &str, format: TextFormat) -> Result<TgMessage> {
+    pub fn send_message(
+        &self,
+        text: &str,
+        format: TextFormat,
+        reply_markup: Option<Value>,
+    ) -> Result<TgMessage> {
         let url = self.bot_url("sendMessage");
         let mut body = json!({
             "chat_id": self.chat_id,
@@ -137,6 +160,9 @@ impl TgClient {
         });
         if let Some(parse_mode) = format.parse_mode() {
             body["parse_mode"] = json!(parse_mode);
+        }
+        if let Some(reply_markup) = reply_markup {
+            body["reply_markup"] = reply_markup;
         }
 
         log::debug!("Sending message: {text} to {url}");
@@ -152,7 +178,7 @@ impl TgClient {
         transient: bool,
         timeout: Duration,
     ) -> Result<()> {
-        let orig = self.send_message(text, format)?;
+        let orig = self.send_message(text, format, None)?;
 
         let reply = self.wait_for_update(&["message", "message_reaction"], timeout, |update| {
             let in_chat =
@@ -186,6 +212,110 @@ impl TgClient {
             self.delete_messages(&cleanup);
         }
         Ok(())
+    }
+
+    /// Sends `text` and waits for the next text message in the chat, returning it.
+    pub fn send_ask(&self, text: &str, format: TextFormat, timeout: Duration) -> Result<String> {
+        let orig = self.send_message(text, format, Some(json!({ "force_reply": true })))?;
+
+        self.wait_for_update(&["message"], timeout, |update| {
+            // Check for a new text message after ours in the same chat
+            if let Some(msg) = update.get("message")
+                && msg.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id)
+                && let Some(mid) = msg.get("message_id").and_then(Value::as_i64)
+                && mid > orig.id
+                && let Some(answer) = msg.get("text").and_then(Value::as_str)
+            {
+                log::debug!("Received answer: {answer}");
+                return Break(answer.to_string());
+            }
+
+            Continue(())
+        })
+    }
+
+    /// Sends `text` with one inline button per option and waits until one is
+    /// pressed, returning the chosen option.
+    pub fn send_pick<'a>(
+        &self,
+        text: &str,
+        format: TextFormat,
+        options: &'a [String],
+        timeout: Duration,
+    ) -> Result<&'a str> {
+        // Use the index as callback data, since it is limited to 64 bytes
+        let keyboard: Vec<Value> = options
+            .iter()
+            .enumerate()
+            .map(|(i, label)| json!([{ "text": label, "callback_data": i.to_string() }]))
+            .collect();
+        let orig = self.send_message(text, format, Some(json!({ "inline_keyboard": keyboard })))?;
+
+        let (query_id, choice) = self.wait_for_update(&["callback_query"], timeout, |update| {
+            // Check for a button press on our message, ignoring stale keyboards
+            if let Some(query) = update.get("callback_query")
+                && let Some(msg) = query.get("message")
+                && msg.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id)
+                && msg.get("message_id").and_then(Value::as_i64) == Some(orig.id)
+                && let Some(id) = query.get("id").and_then(Value::as_str)
+                && let Some(index) = query
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .and_then(|d| d.parse::<usize>().ok())
+                && let Some(choice) = options.get(index)
+            {
+                log::debug!("Received pick: {choice}");
+                return Break((id.to_string(), choice.as_str()));
+            }
+
+            Continue(())
+        })?;
+
+        // Answer to stop the client's loading spinner
+        self.answer_callback_query(&query_id);
+
+        // Record the choice in the message, which also removes the keyboard
+        let edited = format!("{text}\n{}", format.pre(&format!("-> {choice}")));
+        if let Err(e) = self.edit_message_text(orig.id, &edited, format) {
+            log::warn!("Failed to record pick: {e:#}");
+            self.remove_reply_markup(orig.id);
+        }
+        Ok(choice)
+    }
+
+    fn answer_callback_query(&self, query_id: &str) {
+        let body = json!({ "callback_query_id": query_id });
+
+        if let Err(e) = self.call::<bool>("answerCallbackQuery", &body, None) {
+            log::warn!("Failed to answer callback query: {e:#}");
+        }
+    }
+
+    /// Replaces the text of a message, dropping its inline keyboard.
+    fn edit_message_text(&self, message_id: i64, text: &str, format: TextFormat) -> Result<()> {
+        let mut body = json!({
+            "chat_id": self.chat_id,
+            "message_id": message_id,
+            "text": text,
+        });
+        if let Some(parse_mode) = format.parse_mode() {
+            body["parse_mode"] = json!(parse_mode);
+        }
+
+        self.call::<Value>("editMessageText", &body, None)?;
+        Ok(())
+    }
+
+    /// Removes the inline keyboard of a message, keeping its text as is.
+    fn remove_reply_markup(&self, message_id: i64) {
+        let body = json!({
+            "chat_id": self.chat_id,
+            "message_id": message_id,
+        });
+
+        if let Err(e) = self.call::<Value>("editMessageReplyMarkup", &body, None) {
+            log::warn!("Failed to remove keyboard: {e:#}");
+        }
     }
 
     /// Long polls `getUpdates` until `on_update` returns [`Break`] for some
