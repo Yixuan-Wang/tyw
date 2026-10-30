@@ -143,11 +143,12 @@ pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
                 .to_string();
             let rel_str = rel_path.to_string_lossy().to_string();
 
-            let pretty = if !info.prompt.is_empty() && info.prompt != name {
-                vec![format!("{}({})", info.prompt, rel_str), info.version]
+            let label = if info.prompt.is_empty() {
+                name
             } else {
-                vec![name, info.version]
+                info.prompt
             };
+            let pretty = vec![format!("{}({})", label, rel_str), info.version];
 
             Some(FzfLine {
                 key: rel_str,
@@ -157,14 +158,10 @@ pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
         })
         .collect();
 
-    match fzf::fzf_select(choices, &[]) {
-        Ok(selected) => {
-            print!("{}", activate::gen_activate_cmd(&selected, shell));
-        }
-        Err(e) => {
-            log::error!("Failed to select environment: {e}");
-        }
+    if let Some(selected) = fzf::fzf_select(choices, &[])? {
+        print!("{}", activate::gen_activate_cmd(&selected, shell));
+        Ok(())
+    } else {
+        bail!("No environment selected")
     }
-
-    Ok(())
 }
