@@ -42,11 +42,10 @@ pub fn list(config: &PyConfig) -> Result<()> {
     let env_home = Path::new(&config.env.home);
 
     if !env_home.is_dir() {
-        log::error!(
+        bail!(
             "Path does not exist or is not a directory: {}",
             env_home.display()
         );
-        return Ok(());
     }
 
     for dir in env::walk_dir_for_venv(env_home) {
@@ -65,19 +64,17 @@ pub fn use_env(config: &PyConfig, name: Option<&str>, shell: Option<ShellKind>) 
 
 fn use_named_env(config: &PyConfig, name: &str, shell: Option<ShellKind>) -> Result<()> {
     if name.is_empty() {
-        log::error!("Environment name is empty");
-        return Ok(());
+        bail!("Environment name is empty");
     }
 
     let env_home = Path::new(&config.env.home);
     let env_path = env_home.join(name);
 
     if !env_path.is_dir() {
-        log::error!(
+        bail!(
             "Path does not exist or is not a directory: {}",
             env_path.display()
         );
-        return Ok(());
     }
 
     for suffix in ["", ".venv", "venv"] {
@@ -92,8 +89,7 @@ fn use_named_env(config: &PyConfig, name: &str, shell: Option<ShellKind>) -> Res
         }
     }
 
-    log::error!("Environment does not exist: {name}");
-    Ok(())
+    bail!("Environment does not exist: {name}")
 }
 
 fn try_use_env(shell: Option<ShellKind>) -> Result<()> {
@@ -127,11 +123,10 @@ pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
     let env_home = PathBuf::from(&config.env.home);
 
     if !env_home.is_dir() {
-        log::error!(
+        bail!(
             "Environment home does not exist or is not a directory: {}",
             env_home.display()
         );
-        return Ok(());
     }
 
     let venvs = env::walk_dir_for_venv(&env_home);
