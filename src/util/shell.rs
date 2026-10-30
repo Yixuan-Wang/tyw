@@ -16,12 +16,12 @@ pub enum ShellKind {
 ///
 /// Checks the parent process name first, then falls back to $SHELL.
 pub fn detect_shell() -> Option<ShellKind> {
-    get_process_path(parent_id())
+    get_process_path(get_parent_id())
         .and_then(|path| parse_shell_name(&path))
         .or_else(|| parse_shell_name(&std::env::var("SHELL").ok()?))
 }
 
-fn parent_id() -> u32 {
+fn get_parent_id() -> u32 {
     #[cfg(unix)]
     {
         std::os::unix::process::parent_id()

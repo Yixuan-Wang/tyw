@@ -97,7 +97,7 @@ fn parse_option(s: &str) -> Result<String, String> {
 
 pub fn dispatch(config: &TgConfig, command: Commands) -> Result<()> {
     match command {
-        Commands::Text { message, format } => text(
+        Commands::Text { message, format } => send_text(
             config,
             message.as_deref().unwrap_or("Hello, world!"),
             format,
@@ -154,13 +154,13 @@ fn make_client(config: &TgConfig) -> Result<TgClient> {
     Ok(TgClient::new(&config.token, &config.chat_id))
 }
 
-pub fn text(config: &TgConfig, message: &str, format: TextFormat) -> Result<()> {
+fn send_text(config: &TgConfig, message: &str, format: TextFormat) -> Result<()> {
     let client = make_client(config)?;
     client.send_message(message, format, None)?;
     Ok(())
 }
 
-pub fn ping(
+fn ping(
     config: &TgConfig,
     message: &str,
     format: TextFormat,
@@ -172,14 +172,14 @@ pub fn ping(
     Ok(())
 }
 
-pub fn ask(config: &TgConfig, message: &str, format: TextFormat, timeout: Duration) -> Result<()> {
+fn ask(config: &TgConfig, message: &str, format: TextFormat, timeout: Duration) -> Result<()> {
     let client = make_client(config)?;
     let answer = client.send_ask(message, format, timeout)?;
     println!("{answer}");
     Ok(())
 }
 
-pub fn pick(
+fn pick(
     config: &TgConfig,
     message: &str,
     format: TextFormat,

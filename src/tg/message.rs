@@ -16,19 +16,19 @@ const LONG_POLL_SLACK: Duration = Duration::from_secs(10);
 const RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Deserialize)]
-pub struct TgResponse<T> {
-    pub ok: bool,
-    pub result: Option<T>,
-    pub description: Option<String>,
-    pub error_code: Option<i64>,
+struct TgResponse<T> {
+    ok: bool,
+    result: Option<T>,
+    description: Option<String>,
+    error_code: Option<i64>,
 }
 
 /// An `ok: false` response from the Bot API.
 #[derive(Debug)]
-pub struct TgApiError {
-    pub method: String,
-    pub code: Option<i64>,
-    pub description: String,
+struct TgApiError {
+    method: String,
+    code: Option<i64>,
+    description: String,
 }
 
 impl std::fmt::Display for TgApiError {
@@ -43,20 +43,20 @@ impl TgApiError {
     /// Whether the request may succeed if retried, i.e. rate limiting or a
     /// server-side error.
     fn is_transient(&self) -> bool {
-        matches!(self.code, Some(429) | Some(500..))
+        matches!(self.code, Some(429 | 500..))
     }
 }
 
 #[derive(Deserialize)]
-pub struct TgChat {
-    pub id: i64,
+struct TgChat {
+    id: i64,
 }
 
 #[derive(Deserialize)]
 pub struct TgMessage {
     #[serde(rename = "message_id")]
-    pub id: i64,
-    pub chat: TgChat,
+    id: i64,
+    chat: TgChat,
 }
 
 /// Text formatting of a message, mapped to Telegram's `parse_mode`.
@@ -65,14 +65,14 @@ pub enum TextFormat {
     /// Plain text, no formatting
     #[default]
     PlainText,
-    /// Telegram's MarkdownV2 format
+    /// Telegram's `MarkdownV2` format
     Markdown,
     /// Telegram's HTML format
     Html,
 }
 
 impl TextFormat {
-    fn parse_mode(self) -> Option<&'static str> {
+    fn get_parse_mode(self) -> Option<&'static str> {
         match self {
             TextFormat::PlainText => None,
             TextFormat::Markdown => Some("MarkdownV2"),
@@ -81,7 +81,7 @@ impl TextFormat {
     }
 
     /// Wraps `text` in a pre block, escaping it as required by the format.
-    fn pre(self, text: &str) -> String {
+    fn wrap_in_pre(self, text: &str) -> String {
         match self {
             TextFormat::PlainText => text.to_string(),
             TextFormat::Markdown => {
@@ -101,7 +101,7 @@ impl TextFormat {
 
 pub struct TgClient {
     token: String,
-    pub chat_id: String,
+    chat_id: String,
 }
 
 impl TgClient {
@@ -112,7 +112,7 @@ impl TgClient {
         }
     }
 
-    fn bot_url(&self, path: &str) -> String {
+    fn build_bot_url(&self, path: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, path)
     }
 
@@ -124,7 +124,7 @@ impl TgClient {
         body: &Value,
         timeout: Option<Duration>,
     ) -> Result<T> {
-        let resp: TgResponse<T> = ureq::post(&self.bot_url(method))
+        let resp: TgResponse<T> = ureq::post(&self.build_bot_url(method))
             .config()
             .http_status_as_error(false)
             .timeout_global(timeout)
@@ -147,20 +147,25 @@ impl TgClient {
             .with_context(|| format!("Telegram {method} returned no result"))
     }
 
+    fn build_text_body(&self, text: &str, format: TextFormat) -> Value {
+        let mut body = json!({
+            "chat_id": self.chat_id,
+            "text": text,
+        });
+        if let Some(parse_mode) = format.get_parse_mode() {
+            body["parse_mode"] = json!(parse_mode);
+        }
+        body
+    }
+
     pub fn send_message(
         &self,
         text: &str,
         format: TextFormat,
         reply_markup: Option<Value>,
     ) -> Result<TgMessage> {
-        let url = self.bot_url("sendMessage");
-        let mut body = json!({
-            "chat_id": self.chat_id,
-            "text": text,
-        });
-        if let Some(parse_mode) = format.parse_mode() {
-            body["parse_mode"] = json!(parse_mode);
-        }
+        let url = self.build_bot_url("sendMessage");
+        let mut body = self.build_text_body(text, format);
         if let Some(reply_markup) = reply_markup {
             body["reply_markup"] = reply_markup;
         }
@@ -197,7 +202,7 @@ impl TgClient {
             // Check for new message after ours in the same chat
             if let Some(msg) = update.get("message")
                 && in_chat(msg)
-                && let Some(mid) = msg.get("message_id").and_then(|m| m.as_i64())
+                && let Some(mid) = msg.get("message_id").and_then(Value::as_i64)
                 && mid > orig.id
             {
                 log::debug!("Received pong by message");
@@ -275,7 +280,7 @@ impl TgClient {
         self.answer_callback_query(&query_id);
 
         // Record the choice in the message, which also removes the keyboard
-        let edited = format!("{text}\n{}", format.pre(&format!("-> {choice}")));
+        let edited = format!("{text}\n{}", format.wrap_in_pre(&format!("-> {choice}")));
         if let Err(e) = self.edit_message_text(orig.id, &edited, format) {
             log::warn!("Failed to record pick: {e:#}");
             self.remove_reply_markup(orig.id);
@@ -293,14 +298,8 @@ impl TgClient {
 
     /// Replaces the text of a message, dropping its inline keyboard.
     fn edit_message_text(&self, message_id: i64, text: &str, format: TextFormat) -> Result<()> {
-        let mut body = json!({
-            "chat_id": self.chat_id,
-            "message_id": message_id,
-            "text": text,
-        });
-        if let Some(parse_mode) = format.parse_mode() {
-            body["parse_mode"] = json!(parse_mode);
-        }
+        let mut body = self.build_text_body(text, format);
+        body["message_id"] = json!(message_id);
 
         self.call::<Value>("editMessageText", &body, None)?;
         Ok(())
@@ -359,7 +358,7 @@ impl TgClient {
                         }
 
                         // Advance offset
-                        if let Some(uid) = update.get("update_id").and_then(|u| u.as_i64()) {
+                        if let Some(uid) = update.get("update_id").and_then(Value::as_i64) {
                             offset = uid + 1;
                         }
                     }

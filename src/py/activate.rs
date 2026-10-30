@@ -49,7 +49,7 @@ mod tests {
     use ShellKind::*;
 
     #[test]
-    fn posix_quotes_path() {
+    fn quotes_posix_path() {
         let p = Path::new("/a/$(x)'b\"c");
         assert_eq!(
             gen_activate_cmd(p, Some(Sh)),
@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[test]
-    fn fish_quotes_path() {
+    fn quotes_fish_path() {
         let p = Path::new("/a/'b\\c");
         assert_eq!(
             gen_activate_cmd(p, Some(Fish)),
@@ -69,7 +69,7 @@ mod tests {
 
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn pwsh_quotes_path() {
+    fn quotes_pwsh_path() {
         let p = Path::new("/nonexistent/a'b$x");
         assert_eq!(
             gen_activate_cmd(p, Some(Pwsh)),

@@ -11,7 +11,7 @@ pub struct FzfLine<V> {
 }
 
 /// Spawn fzf with the given choices and return the selected raw value.
-pub fn fzf_select<V>(choices: Vec<FzfLine<V>>, extra_args: &[&str]) -> Result<Option<V>> {
+pub fn select_with_fzf<V>(choices: Vec<FzfLine<V>>, extra_args: &[&str]) -> Result<Option<V>> {
     let mut args = vec!["--delimiter", "\t", "--with-nth", "2.."];
     args.extend_from_slice(extra_args);
 
@@ -28,8 +28,14 @@ pub fn fzf_select<V>(choices: Vec<FzfLine<V>>, extra_args: &[&str]) -> Result<Op
     {
         let stdin = fzf.stdin.as_mut().context("Failed to open fzf stdin")?;
         for choice in choices {
-            let pretty = choice.pretty.join(" ");
-            writeln!(stdin, "{}\t{}", choice.key, pretty)?;
+            write!(stdin, "{}\t", choice.key)?;
+            for (i, part) in choice.pretty.iter().enumerate() {
+                if i > 0 {
+                    write!(stdin, " ")?;
+                }
+                write!(stdin, "{part}")?;
+            }
+            writeln!(stdin)?;
             mapping.insert(choice.key, choice.raw);
         }
     }
@@ -37,7 +43,7 @@ pub fn fzf_select<V>(choices: Vec<FzfLine<V>>, extra_args: &[&str]) -> Result<Op
     let output = fzf.wait_with_output().context("Failed to run fzf")?;
     match output.status.code() {
         Some(0) => {}
-        Some(1) | Some(130) => return Ok(None),
+        Some(1 | 130) => return Ok(None),
         _ => bail!("fzf exited with non-zero status"),
     }
 

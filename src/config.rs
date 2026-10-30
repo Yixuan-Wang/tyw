@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -20,7 +20,7 @@ pub struct PyConfig {
 #[derive(Deserialize, Default)]
 pub struct PyEnvConfig {
     #[serde(default)]
-    pub home: String,
+    pub home: PathBuf,
 }
 
 #[derive(Deserialize, Default)]
@@ -32,10 +32,10 @@ pub struct TgConfig {
 }
 
 impl AppConfig {
-    pub fn load(config_path: Option<&str>) -> Result<Self> {
+    pub fn load(config_path: Option<&Path>) -> Result<Self> {
         let has_designated_config = config_path.is_some();
         let path = match config_path {
-            Some(p) => PathBuf::from(p),
+            Some(p) => p.to_path_buf(),
             None => Self::find_config_file(),
         };
 
@@ -44,7 +44,9 @@ impl AppConfig {
                 log::info!("Loaded config file: {}", path.display());
                 toml::from_str(&contents).context("Failed to parse config file")?
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !has_designated_config => AppConfig::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !has_designated_config => {
+                AppConfig::default()
+            }
             Err(e) => {
                 return Err(e)
                     .with_context(|| format!("Failed to read config from {}", path.display()));

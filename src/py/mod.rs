@@ -1,7 +1,7 @@
 mod activate;
 mod env;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
@@ -38,8 +38,8 @@ pub fn dispatch(config: &PyConfig, command: Commands) -> Result<()> {
     }
 }
 
-pub fn list(config: &PyConfig) -> Result<()> {
-    let env_home = Path::new(&config.env.home);
+fn list(config: &PyConfig) -> Result<()> {
+    let env_home = &config.env.home;
 
     if !env_home.is_dir() {
         bail!(
@@ -55,7 +55,7 @@ pub fn list(config: &PyConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn use_env(config: &PyConfig, name: Option<&str>, shell: Option<ShellKind>) -> Result<()> {
+fn use_env(config: &PyConfig, name: Option<&str>, shell: Option<ShellKind>) -> Result<()> {
     match name {
         Some(name) => use_named_env(config, name, shell),
         None => try_use_env(shell),
@@ -67,8 +67,7 @@ fn use_named_env(config: &PyConfig, name: &str, shell: Option<ShellKind>) -> Res
         bail!("Environment name is empty");
     }
 
-    let env_home = Path::new(&config.env.home);
-    let env_path = env_home.join(name);
+    let env_path = config.env.home.join(name);
 
     if !env_path.is_dir() {
         bail!(
@@ -102,8 +101,7 @@ fn try_use_env(shell: Option<ShellKind>) -> Result<()> {
         );
     }
 
-    let mut dir = cwd;
-    loop {
+    for dir in cwd.ancestors() {
         for subdir in ["venv", ".venv"] {
             let candidate = dir.join(subdir);
             if candidate.join("pyvenv.cfg").exists() {
@@ -111,16 +109,13 @@ fn try_use_env(shell: Option<ShellKind>) -> Result<()> {
                 return Ok(());
             }
         }
-
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => bail!("No virtual environment found in the directory tree"),
-        }
     }
+
+    bail!("No virtual environment found in the directory tree")
 }
 
-pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
-    let env_home = PathBuf::from(&config.env.home);
+fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
+    let env_home = &config.env.home;
 
     if !env_home.is_dir() {
         bail!(
@@ -129,24 +124,20 @@ pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
         );
     }
 
-    let venvs = env::walk_dir_for_venv(&env_home);
+    let venvs = env::walk_dir_for_venv(env_home);
 
     let choices: Vec<FzfLine<PathBuf>> = venvs
         .into_iter()
         .filter_map(|path| {
-            let rel_path = path.strip_prefix(&env_home).ok()?.to_path_buf();
+            let rel_path = path.strip_prefix(env_home).ok()?;
             let info = env::get_venv_info(&path).ok()?;
-            let name = rel_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            let rel_str = rel_path.to_string_lossy().to_string();
+            let name = rel_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let rel_str = rel_path.to_string_lossy().into_owned();
 
             let label = if info.prompt.is_empty() {
                 name
             } else {
-                info.prompt
+                &info.prompt
             };
             let pretty = vec![format!("{}({})", label, rel_str), info.version];
 
@@ -158,7 +149,7 @@ pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
         })
         .collect();
 
-    if let Some(selected) = fzf::fzf_select(choices, &[])? {
+    if let Some(selected) = fzf::select_with_fzf(choices, &[])? {
         print!("{}", activate::gen_activate_cmd(&selected, shell));
         Ok(())
     } else {

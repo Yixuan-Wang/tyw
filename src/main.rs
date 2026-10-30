@@ -3,6 +3,8 @@ mod py;
 mod tg;
 mod util;
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use clap_verbosity_flag::{OffLevel, Verbosity};
@@ -12,9 +14,9 @@ use config::AppConfig;
 #[derive(Parser)]
 #[command(name = "tyw", about = "Yixuan \"Tom\" Wang's command line utilities")]
 struct Cli {
-    /// Config file (default: $XDG_CONFIG_HOME/tyw.toml)
+    /// Config file (default: `$XDG_CONFIG_HOME/tyw.toml`)
     #[arg(long, global = true)]
-    config: Option<String>,
+    config: Option<PathBuf>,
 
     #[command(flatten)]
     verbose: Verbosity<OffLevel>,
