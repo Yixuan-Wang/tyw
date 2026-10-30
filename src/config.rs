@@ -33,25 +33,23 @@ pub struct TgConfig {
 
 impl AppConfig {
     pub fn load(config_path: Option<&str>) -> Result<Self> {
-        let path = if let Some(p) = config_path {
-            PathBuf::from(p)
-        } else {
-            Self::find_config_file()
+        let has_designated_config = config_path.is_some();
+        let path = match config_path {
+            Some(p) => PathBuf::from(p),
+            None => Self::find_config_file(),
         };
 
-        let contents = match std::fs::read_to_string(&path) {
-            Ok(c) => {
+        let mut config = match std::fs::read_to_string(&path) {
+            Ok(contents) => {
                 log::info!("Loaded config file: {}", path.display());
-                c
+                toml::from_str(&contents).context("Failed to parse config file")?
             }
-            Err(_) => {
-                log::error!("Failed to load config from {}", path.display());
-                return Ok(AppConfig::default());
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && !has_designated_config => AppConfig::default(),
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("Failed to read config from {}", path.display()));
             }
         };
-
-        let mut config: AppConfig =
-            toml::from_str(&contents).context("Failed to parse config file")?;
 
         // Override tg.token from TELEGRAM_TOKEN env var if set
         if let Ok(token) = std::env::var("TELEGRAM_TOKEN") {
