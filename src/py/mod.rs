@@ -14,19 +14,27 @@ pub enum Commands {
     Use {
         /// Environment name (omit to auto-detect from cwd)
         name: Option<String>,
+        /// Shell to generate the activation command for (default: auto-detect)
+        #[arg(long, value_enum)]
+        shell: Option<ShellKind>,
     },
     /// Select and use a Python virtual environment
-    Sel,
+    Sel {
+        /// Shell to generate the activation command for (default: auto-detect)
+        #[arg(long, value_enum)]
+        shell: Option<ShellKind>,
+    },
 }
 
 use crate::config::PyConfig;
 use crate::util::fzf::{self, FzfLine};
+use crate::util::shell::ShellKind;
 
 pub fn dispatch(config: &PyConfig, command: Commands) -> Result<()> {
     match command {
         Commands::List => list(config),
-        Commands::Use { name } => use_env(config, name.as_deref()),
-        Commands::Sel => select_env(config),
+        Commands::Use { name, shell } => use_env(config, name.as_deref(), shell),
+        Commands::Sel { shell } => select_env(config, shell),
     }
 }
 
@@ -48,14 +56,14 @@ pub fn list(config: &PyConfig) -> Result<()> {
     Ok(())
 }
 
-pub fn use_env(config: &PyConfig, name: Option<&str>) -> Result<()> {
+pub fn use_env(config: &PyConfig, name: Option<&str>, shell: Option<ShellKind>) -> Result<()> {
     match name {
-        Some(name) => use_named_env(config, name),
-        None => try_use_env(),
+        Some(name) => use_named_env(config, name, shell),
+        None => try_use_env(shell),
     }
 }
 
-fn use_named_env(config: &PyConfig, name: &str) -> Result<()> {
+fn use_named_env(config: &PyConfig, name: &str, shell: Option<ShellKind>) -> Result<()> {
     if name.is_empty() {
         log::error!("Environment name is empty");
         return Ok(());
@@ -79,7 +87,7 @@ fn use_named_env(config: &PyConfig, name: &str) -> Result<()> {
             env_path.join(suffix)
         };
         if variation.join("pyvenv.cfg").exists() {
-            print!("{}", activate::gen_activate_cmd(&variation, ""));
+            print!("{}", activate::gen_activate_cmd(&variation, shell));
             return Ok(());
         }
     }
@@ -88,7 +96,7 @@ fn use_named_env(config: &PyConfig, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn try_use_env() -> Result<()> {
+fn try_use_env(shell: Option<ShellKind>) -> Result<()> {
     let cwd = std::env::current_dir()?;
 
     if !cwd.is_dir() {
@@ -103,7 +111,7 @@ fn try_use_env() -> Result<()> {
         for subdir in ["venv", ".venv"] {
             let candidate = dir.join(subdir);
             if candidate.join("pyvenv.cfg").exists() {
-                println!("{}", activate::gen_activate_cmd(&candidate, ""));
+                println!("{}", activate::gen_activate_cmd(&candidate, shell));
                 return Ok(());
             }
         }
@@ -115,7 +123,7 @@ fn try_use_env() -> Result<()> {
     }
 }
 
-pub fn select_env(config: &PyConfig) -> Result<()> {
+pub fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
     let env_home = PathBuf::from(&config.env.home);
 
     if !env_home.is_dir() {
@@ -156,7 +164,7 @@ pub fn select_env(config: &PyConfig) -> Result<()> {
 
     match fzf::fzf_select(choices, &[]) {
         Ok(selected) => {
-            print!("{}", activate::gen_activate_cmd(&selected, ""));
+            print!("{}", activate::gen_activate_cmd(&selected, shell));
         }
         Err(e) => {
             log::error!("Failed to select environment: {e}");
