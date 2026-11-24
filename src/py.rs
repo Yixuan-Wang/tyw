@@ -1,7 +1,7 @@
 mod activate;
 mod env;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
@@ -50,15 +50,22 @@ pub fn dispatch(config: &PyConfig, command: Commands) -> Result<()> {
     }
 }
 
-fn list(config: &PyConfig) -> Result<()> {
+fn require_env_home(config: &PyConfig) -> Result<&Path> {
     let env_home = &config.env.home;
-
+    if env_home.as_os_str().is_empty() {
+        bail!("no py.env.home found in config");
+    }
     if !env_home.is_dir() {
         bail!(
-            "Path does not exist or is not a directory: {}",
+            "Environment home does not exist or is not a directory: {}",
             env_home.display()
         );
     }
+    Ok(env_home)
+}
+
+fn list(config: &PyConfig) -> Result<()> {
+    let env_home = require_env_home(config)?;
 
     for dir in env::walk_dir_for_venv(env_home) {
         println!("{}", dir.display());
@@ -79,7 +86,8 @@ fn use_named_env(config: &PyConfig, name: &str, shell: Option<ShellKind>) -> Res
         bail!("Environment name is empty");
     }
 
-    let env_path = config.env.home.join(name);
+    let env_home = require_env_home(config)?;
+    let env_path = env_home.join(name);
 
     if !env_path.is_dir() {
         bail!(
@@ -95,7 +103,7 @@ fn use_named_env(config: &PyConfig, name: &str, shell: Option<ShellKind>) -> Res
             env_path.join(suffix)
         };
         if variation.join("pyvenv.cfg").exists() {
-            print!("{}", activate::gen_activate_cmd(&variation, shell));
+            println!("{}", activate::gen_activate_cmd(&variation, shell));
             return Ok(());
         }
     }
@@ -127,14 +135,7 @@ fn try_use_env(shell: Option<ShellKind>) -> Result<()> {
 }
 
 fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
-    let env_home = &config.env.home;
-
-    if !env_home.is_dir() {
-        bail!(
-            "Environment home does not exist or is not a directory: {}",
-            env_home.display()
-        );
-    }
+    let env_home = require_env_home(config)?;
 
     let venvs = env::walk_dir_for_venv(env_home);
 
@@ -162,7 +163,7 @@ fn select_env(config: &PyConfig, shell: Option<ShellKind>) -> Result<()> {
         .collect();
 
     if let Some(selected) = fzf::select_with_fzf(choices, &[])? {
-        print!("{}", activate::gen_activate_cmd(&selected, shell));
+        println!("{}", activate::gen_activate_cmd(&selected, shell));
         Ok(())
     } else {
         bail!("No environment selected")

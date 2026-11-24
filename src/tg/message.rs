@@ -102,13 +102,18 @@ impl TextFormat {
 pub struct TgClient {
     token: String,
     chat_id: String,
+    agent: ureq::Agent,
 }
 
 impl TgClient {
     pub fn new(token: &str, chat_id: &str) -> Self {
+        let config = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build();
         Self {
             token: token.to_string(),
             chat_id: chat_id.to_string(),
+            agent: ureq::Agent::new_with_config(config),
         }
     }
 
@@ -124,9 +129,10 @@ impl TgClient {
         body: &Value,
         timeout: Option<Duration>,
     ) -> Result<T> {
-        let resp: TgResponse<T> = ureq::post(&self.build_bot_url(method))
+        let resp: TgResponse<T> = self
+            .agent
+            .post(&self.build_bot_url(method))
             .config()
-            .http_status_as_error(false)
             .timeout_global(timeout)
             .build()
             .send_json(body)
@@ -164,13 +170,12 @@ impl TgClient {
         format: TextFormat,
         reply_markup: Option<Value>,
     ) -> Result<TgMessage> {
-        let url = self.build_bot_url("sendMessage");
         let mut body = self.build_text_body(text, format);
         if let Some(reply_markup) = reply_markup {
             body["reply_markup"] = reply_markup;
         }
 
-        log::debug!("Sending message: {text} to {url}");
+        log::debug!("Sending message to chat {}: {text}", self.chat_id);
 
         self.call("sendMessage", &body, None)
             .context("Failed to send message")
@@ -183,9 +188,11 @@ impl TgClient {
         transient: bool,
         timeout: Duration,
     ) -> Result<()> {
+        let allowed_updates = ["message", "message_reaction"];
+        let offset = self.skip_pending_updates(&allowed_updates);
         let orig = self.send_message(text, format, None)?;
 
-        let reply = self.wait_for_update(&["message", "message_reaction"], timeout, |update| {
+        let reply = self.wait_for_update(&allowed_updates, offset, timeout, |update| {
             let in_chat =
                 |v: &Value| v.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id);
 
@@ -221,9 +228,11 @@ impl TgClient {
 
     /// Sends `text` and waits for the next text message in the chat, returning it.
     pub fn send_ask(&self, text: &str, format: TextFormat, timeout: Duration) -> Result<String> {
+        let allowed_updates = ["message"];
+        let offset = self.skip_pending_updates(&allowed_updates);
         let orig = self.send_message(text, format, Some(json!({ "force_reply": true })))?;
 
-        self.wait_for_update(&["message"], timeout, |update| {
+        self.wait_for_update(&allowed_updates, offset, timeout, |update| {
             // Check for a new text message after ours in the same chat
             if let Some(msg) = update.get("message")
                 && msg.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id)
@@ -254,27 +263,30 @@ impl TgClient {
             .enumerate()
             .map(|(i, label)| json!([{ "text": label, "callback_data": i.to_string() }]))
             .collect();
+        let allowed_updates = ["callback_query"];
+        let offset = self.skip_pending_updates(&allowed_updates);
         let orig = self.send_message(text, format, Some(json!({ "inline_keyboard": keyboard })))?;
 
-        let (query_id, choice) = self.wait_for_update(&["callback_query"], timeout, |update| {
-            // Check for a button press on our message, ignoring stale keyboards
-            if let Some(query) = update.get("callback_query")
-                && let Some(msg) = query.get("message")
-                && msg.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id)
-                && msg.get("message_id").and_then(Value::as_i64) == Some(orig.id)
-                && let Some(id) = query.get("id").and_then(Value::as_str)
-                && let Some(index) = query
-                    .get("data")
-                    .and_then(Value::as_str)
-                    .and_then(|d| d.parse::<usize>().ok())
-                && let Some(choice) = options.get(index)
-            {
-                log::debug!("Received pick: {choice}");
-                return Break((id.to_string(), choice.as_str()));
-            }
+        let (query_id, choice) =
+            self.wait_for_update(&allowed_updates, offset, timeout, |update| {
+                // Check for a button press on our message, ignoring stale keyboards
+                if let Some(query) = update.get("callback_query")
+                    && let Some(msg) = query.get("message")
+                    && msg.pointer("/chat/id").and_then(Value::as_i64) == Some(orig.chat.id)
+                    && msg.get("message_id").and_then(Value::as_i64) == Some(orig.id)
+                    && let Some(id) = query.get("id").and_then(Value::as_str)
+                    && let Some(index) = query
+                        .get("data")
+                        .and_then(Value::as_str)
+                        .and_then(|d| d.parse::<usize>().ok())
+                    && let Some(choice) = options.get(index)
+                {
+                    log::debug!("Received pick: {choice}");
+                    return Break((id.to_string(), choice.as_str()));
+                }
 
-            Continue(())
-        })?;
+                Continue(())
+            })?;
 
         // Answer to stop the client's loading spinner
         self.answer_callback_query(&query_id);
@@ -317,18 +329,44 @@ impl TgClient {
         }
     }
 
-    /// Long polls `getUpdates` until `on_update` returns [`Break`] for some
-    /// update, or `timeout` elapses.
+    /// Discards pending updates and returns the offset of the first update yet
+    /// to come, falling back to `-1` (only the latest update) on failure.
+    ///
+    /// Call this before sending the message whose responses are awaited, so
+    /// that `allowed_updates` is in effect and no response can be skipped.
+    fn skip_pending_updates(&self, allowed_updates: &[&str]) -> i64 {
+        // Telegram only records update types from `allowed_updates` after a call sets it
+        let body = json!({
+            "allowed_updates": allowed_updates,
+            "offset": -1,
+            "timeout": 0,
+        });
+
+        match self.call::<Vec<Value>>("getUpdates", &body, Some(LONG_POLL_SLACK)) {
+            Ok(updates) => updates
+                .last()
+                .and_then(|u| u.get("update_id"))
+                .and_then(Value::as_i64)
+                .map_or(0, |uid| uid + 1),
+            Err(e) => {
+                log::warn!("Failed to discard pending updates: {e:#}");
+                -1
+            }
+        }
+    }
+
+    /// Long polls `getUpdates` from `offset` until `on_update` returns
+    /// [`Break`] for some update, or `timeout` elapses.
     ///
     /// Network failures, rate limiting and server-side errors are retried;
     /// other API errors (e.g. a bad token or a conflicting webhook) are returned.
     fn wait_for_update<T>(
         &self,
         allowed_updates: &[&str],
+        mut offset: i64,
         timeout: Duration,
         mut on_update: impl FnMut(&Value) -> ControlFlow<T>,
     ) -> Result<T> {
-        let mut offset: i64 = -1;
         let deadline = Instant::now() + timeout;
 
         loop {
@@ -353,12 +391,16 @@ impl TgClient {
             ) {
                 Ok(updates) => {
                     for update in &updates {
+                        let uid = update.get("update_id").and_then(Value::as_i64);
                         if let Break(value) = on_update(update) {
+                            if let Some(uid) = uid {
+                                self.confirm_updates(uid + 1);
+                            }
                             return Ok(value);
                         }
 
                         // Advance offset
-                        if let Some(uid) = update.get("update_id").and_then(Value::as_i64) {
+                        if let Some(uid) = uid {
                             offset = uid + 1;
                         }
                     }
@@ -373,6 +415,21 @@ impl TgClient {
                     thread::sleep(RETRY_DELAY);
                 }
             }
+        }
+    }
+
+    /// Marks all updates before `offset` as consumed so they are not
+    /// redelivered.
+    fn confirm_updates(&self, offset: i64) {
+        // Confirmation is a side effect of `getUpdates`; `limit` only trims the response
+        let body = json!({
+            "offset": offset,
+            "limit": 1,
+            "timeout": 0,
+        });
+
+        if let Err(e) = self.call::<Vec<Value>>("getUpdates", &body, Some(LONG_POLL_SLACK)) {
+            log::warn!("Failed to confirm updates: {e:#}");
         }
     }
 

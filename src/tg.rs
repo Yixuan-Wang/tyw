@@ -154,6 +154,9 @@ pub fn dispatch(config: &TgConfig, command: Commands) -> Result<()> {
 }
 
 fn make_client(config: &TgConfig) -> Result<TgClient> {
+    if config.token.is_empty() {
+        bail!("no token found in config (set tg.token or TELEGRAM_TOKEN)");
+    }
     if config.chat_id.is_empty() {
         bail!("no chat_id found in config");
     }
