@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
+use serde::Deserialize;
 
-use crate::config::TgConfig;
+use crate::util::cli_parser::{parse_duration, parse_non_empty_str};
 use message::{TextFormat, TgClient};
 
 #[derive(Subcommand)]
@@ -28,7 +29,7 @@ pub enum Commands {
         #[arg(short, long, value_enum, default_value_t = TextFormat::PlainText)]
         format: TextFormat,
 
-        /// Duration to wait before timeout (e.g. "6h", "30m", "1h30m")
+        /// Duration to wait before timeout
         #[arg(short, long, default_value = "6h", value_parser = parse_duration)]
         timeout: Duration,
 
@@ -66,7 +67,7 @@ pub enum Commands {
             long = "option",
             value_name = "OPTION",
             required_unless_present = "confirm",
-            value_parser = parse_option
+            value_parser = parse_non_empty_str
         )]
         options: Vec<String>,
 
@@ -84,15 +85,20 @@ pub enum Commands {
     },
 }
 
-fn parse_duration(s: &str) -> Result<Duration, String> {
-    humantime::parse_duration(s).map_err(|e| e.to_string())
+#[derive(Deserialize, Default)]
+pub struct TgConfig {
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    pub chat_id: String,
 }
 
-fn parse_option(s: &str) -> Result<String, String> {
-    if s.trim().is_empty() {
-        return Err("option must not be empty".into());
+impl TgConfig {
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(token) = std::env::var("TELEGRAM_TOKEN") {
+            self.token = token;
+        }
     }
-    Ok(s.to_string())
 }
 
 pub fn dispatch(config: &TgConfig, command: Commands) -> Result<()> {

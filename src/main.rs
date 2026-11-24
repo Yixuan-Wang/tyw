@@ -28,15 +28,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Python utilities
-    Py {
-        #[command(subcommand)]
-        command: py::Commands,
-    },
+    #[command(subcommand)]
+    Py(py::Commands),
     /// Telegram utilities
-    Tg {
-        #[command(subcommand)]
-        command: tg::Commands,
-    },
+    #[command(subcommand)]
+    Tg(tg::Commands),
 }
 
 fn main() -> Result<()> {
@@ -49,7 +45,7 @@ fn main() -> Result<()> {
     let config = AppConfig::load(cli.config.as_deref())?;
 
     match cli.command {
-        Commands::Py { command } => py::dispatch(&config.py, command),
-        Commands::Tg { command } => tg::dispatch(&config.tg, command),
+        Commands::Py(command) => py::dispatch(&config.py, command),
+        Commands::Tg(command) => tg::dispatch(&config.tg, command),
     }
 }

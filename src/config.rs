@@ -3,32 +3,15 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+use crate::py::PyConfig;
+use crate::tg::TgConfig;
+
 #[derive(Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub py: PyConfig,
     #[serde(default)]
     pub tg: TgConfig,
-}
-
-#[derive(Deserialize, Default)]
-pub struct PyConfig {
-    #[serde(default)]
-    pub env: PyEnvConfig,
-}
-
-#[derive(Deserialize, Default)]
-pub struct PyEnvConfig {
-    #[serde(default)]
-    pub home: PathBuf,
-}
-
-#[derive(Deserialize, Default)]
-pub struct TgConfig {
-    #[serde(default)]
-    pub token: String,
-    #[serde(default)]
-    pub chat_id: String,
 }
 
 impl AppConfig {
@@ -53,10 +36,7 @@ impl AppConfig {
             }
         };
 
-        // Override tg.token from TELEGRAM_TOKEN env var if set
-        if let Ok(token) = std::env::var("TELEGRAM_TOKEN") {
-            config.tg.token = token;
-        }
+        config.tg.apply_env_overrides();
 
         Ok(config)
     }

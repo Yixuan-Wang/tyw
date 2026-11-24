@@ -5,6 +5,10 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
+use serde::Deserialize;
+
+use crate::util::fzf::{self, FzfLine};
+use crate::util::shell::ShellKind;
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -26,9 +30,17 @@ pub enum Commands {
     },
 }
 
-use crate::config::PyConfig;
-use crate::util::fzf::{self, FzfLine};
-use crate::util::shell::ShellKind;
+#[derive(Deserialize, Default)]
+pub struct PyConfig {
+    #[serde(default)]
+    pub env: PyEnvConfig,
+}
+
+#[derive(Deserialize, Default)]
+pub struct PyEnvConfig {
+    #[serde(default)]
+    pub home: PathBuf,
+}
 
 pub fn dispatch(config: &PyConfig, command: Commands) -> Result<()> {
     match command {

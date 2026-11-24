@@ -57,7 +57,6 @@ fn get_process_path(pid: u32) -> Option<String> {
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
-        let _ = pid;
         None
     }
 }
