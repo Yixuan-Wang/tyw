@@ -142,7 +142,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -233,7 +233,7 @@ checksum = "97369cbbc041bc366949bc74d34658d6cda5621039731c6310521892a3a20ae0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -264,7 +264,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "env_filter",
- "jiff",
+ "jiff 0.2.23",
  "log",
 ]
 
@@ -337,12 +337,6 @@ name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
-
-[[package]]
-name = "humantime"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
 name = "icu_collections"
@@ -474,11 +468,34 @@ version = "0.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a3546dc96b6d42c5f24902af9e2538e82e39ad350b0c766eb3fbf2d8f3d8359"
 dependencies = [
- "jiff-static",
+ "jiff-static 0.2.23",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+]
+
+[[package]]
+name = "jiff"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107f2e89536b6818514025f6787b0d94d819e54fe3b40365275fc753de485b3f"
+dependencies = [
+ "jiff-core",
+ "jiff-static 1.0.3",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+]
+
+[[package]]
+name = "jiff-core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d44c923edf2bf456a982253f1a9ee1f6e89e421dffd0065d9b9a581da0def58f"
+dependencies = [
+ "log",
 ]
 
 [[package]]
@@ -489,7 +506,19 @@ checksum = "2a8c8b344124222efd714b73bb41f8b5120b27a7cc1c75593a6ff768d9d05aa4"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4996f71e569e3a3e32b925c28ef8f0027dc30bb1d594b33eeda409eea185f5c8"
+dependencies = [
+ "jiff-core",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -735,7 +764,7 @@ checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -808,6 +837,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "syn"
+version = "3.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
 name = "synstructure"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -815,7 +855,7 @@ checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -835,7 +875,7 @@ checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -929,7 +969,7 @@ dependencies = [
  "clap-verbosity-flag",
  "dirs",
  "env_logger",
- "humantime",
+ "jiff 1.0.3",
  "log",
  "serde",
  "serde_json",
@@ -1154,7 +1194,7 @@ checksum = "b659052874eb698efe5b9e8cf382204678a0086ebf46982b79d6ca3182927e5d"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
  "synstructure",
 ]
 
@@ -1175,7 +1215,7 @@ checksum = "d71e5d6e06ab090c67b5e44993ec16b72dcbaabc526db883a360057678b48502"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
  "synstructure",
 ]
 
@@ -1215,7 +1255,7 @@ checksum = "eadce39539ca5cb3985590102671f2567e659fca9666581ad3411d59207951f3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
